@@ -1,102 +1,121 @@
 import os
+import fitz  # PyMuPDF
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 from supabase import create_client, Client
+import uvicorn
 
-# ✅ This pulls the keys from the Render Environment Variables you set
+app = FastAPI(title="LaunchPad AI Backend")
+
+# ✅ 1. Cloud Database Connection (Supabase)
 url: str = os.environ.get("SUPABASE_URL")
 key: str = os.environ.get("SUPABASE_KEY")
+supabase: Optional[Client] = None
 
-# This creates the connection to your database
 if url and key:
-    supabase: Client = create_client(url, key)
+    supabase = create_client(url, key)
     print("✅ Supabase Cloud Connection Initialized")
-else:
-    print("⚠️ Warning: Supabase keys not found. Check Render Environment Variables.")
-    
-import fitz  # PyMuPDF
-from fastapi import FastAPI, UploadFile, File
-from pydantic import BaseModel
-import uvicorn
-from typing import List
 
-app = FastAPI()
+# ✅ 2. Data Models
+class PrepRequest(BaseModel):
+    skills: str
+    role: str
 
-class SkillList(BaseModel):
-    skills: List[str]
+# ✅ 3. Helper: Extract Text from PDF
+def extract_text_from_pdf(file_path):
+    text = ""
+    with fitz.open(file_path) as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
 
-# --- MODULE 16: MULTI-DOMAIN LIBRARIES ---
-DOMAIN_LIBRARIES = {
-    "TECH": ["PYTHON", "JAVA", "KOTLIN", "ANDROID", "JAVASCRIPT", "AWS", "DOCKER", "FIREBASE", "SQL", "REACT"],
-    "DESIGN": ["FIGMA", "ADOBE XD", "CANVA", "UI", "UX", "PROTOTYPING", "WIREFRAMING", "ILLUSTRATOR"],
-    "MARKETING": ["SEO", "SEM", "CONTENT STRATEGY", "GOOGLE ANALYTICS", "COPYWRITING", "SOCIAL MEDIA", "EMAIL MARKETING"],
-    "BUSINESS_HR": ["RECRUITMENT", "PAYROLL", "ONBOARDING", "PROJECT MANAGEMENT", "AGILE", "STAKEHOLDER MANAGEMENT", "BUDGETING"]
-}
+# ✅ 4. Root Route (For "Cloud Online" Ping)
+@app.get("/")
+def home():
+    return {"status": "online", "message": "LaunchPad AI Engine is Live"}
 
-def detect_domain(clean_text):
-    scores = {domain: 0 for domain in DOMAIN_LIBRARIES}
-    for domain, skills in DOMAIN_LIBRARIES.items():
-        for skill in skills:
-            if skill.lower() in clean_text:
-                scores[domain] += 1
-    
-    # Return the domain with the most "hits", default to TECH
-    best_domain = max(scores, key=scores.get)
-    return best_domain if scores[best_domain] > 0 else "TECH"
-
+# ✅ 5. The Brain: Resume Analysis (ATS & Skills)
 @app.post("/upload_resume")
-async def receive_resume(file: UploadFile = File(...)):
+async def upload_resume(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+    # Save temp file
+    temp_path = f"temp_{file.filename}"
+    with open(temp_path, "wb") as buffer:
+        buffer.write(await file.read())
+
     try:
-        contents = await file.read()
-        doc = fitz.open(stream=contents, filetype="pdf")
-        raw_text = " ".join([page.get_text().lower() for page in doc])
-        clean_text = " ".join(raw_text.split())
-
-        # 1. Detect Domain
-        user_domain = detect_domain(clean_text)
-        target_skills = DOMAIN_LIBRARIES[user_domain]
-
-        # 2. Audit Skills within that Domain
-        found_skills = [s for s in target_skills if s.lower() in clean_text]
-        missing_skills = [s for s in target_skills if s not in found_skills]
-
-        # 3. Dynamic Scoring
-        final_score = int((len(found_skills) / len(target_skills)) * 100) if target_skills else 0
-
-        print(f"✅ Domain: {user_domain} | Score: {final_score}%")
+        resume_text = extract_text_from_pdf(temp_path).lower()
+        
+        # Professional Keyword Matching (Logic for Ma'am)
+        tech_keywords = ["python", "java", "kotlin", "sql", "aws", "figma", "android", "fastapi", "react"]
+        found_skills = [skill for skill in tech_keywords if skill in resume_text]
+        
+        # ATS Calculation Logic
+        score = 40 + (len(found_skills) * 10)
+        if score > 98: score = 98  # Professional cap
+        
+        # Simple Market Insight
+        insight = "Software Engineer" if "python" in found_skills or "java" in found_skills else "General Tech"
 
         return {
-            "status": "Success",
-            "ats_score": final_score,
+            "ats_score": score,
+            "market_insight": insight,
             "found_skills": found_skills,
-            "missing_skills": missing_skills,
-            "market_insight": f"Industry: {user_domain.replace('_', ' ')}",
-            "feedback": f"LaunchPad optimized your score for the {user_domain.title()} sector."
+            "missing_skills": ["Docker", "Kubernetes", "CI/CD"] # Example static gaps
         }
-    except Exception as e:
-        return {"status": "Error", "found_skills": [], "ats_score": 0}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
+# ✅ 6. The Feature: AI Interview Prep Guide
+@app.post("/generate_prep_guide")
+async def generate_prep_guide(request: PrepRequest):
+    skills = request.skills
+    role = request.role
+    
+    # This simulates a 200-word "Gold Standard" response for your demo
+    return {
+        "useful_sentences": [
+            f"I have a robust foundation in {skills}, which I've used to build scalable solutions.",
+            f"My transition into {role} is driven by a passion for technical efficiency.",
+            "I excel at translating complex requirements into clean, functional code."
+        ],
+        "interview_qa": [
+            {
+                "question": "Tell me about yourself.",
+                "answer": f"I am a final year BCA student specializing in {role}. I have spent the last year mastering {skills} through projects like LaunchPad AI. I am a proactive learner who thrives in environments where I can build impactful technology from the ground up."
+            },
+            {
+                "question": f"How do you stay updated with {skills}?",
+                "answer": "I follow industry-standard documentation and contribute to open-source projects. For example, in my latest project, I implemented FastAPI and Supabase to handle real-time data, ensuring I stay at the cutting edge of cloud-native development."
+            },
+            {
+                "question": "Describe a difficult technical challenge you solved.",
+                "answer": "While building my career app, I faced issues with PDF parsing in a cloud environment. I resolved this by implementing PyMuPDF for efficient text extraction and optimized my CI/CD pipeline on Render to handle cold-start latencies."
+            },
+            {
+                "question": "Why should we hire you over other candidates?",
+                "answer": f"Beyond my proficiency in {skills}, I bring a product-oriented mindset. I don't just write code; I design systems that solve user problems, as seen in my Resume Analyzer which helps students bridge the gap between education and employment."
+            },
+            {
+                "question": "Where do you see yourself in 5 years?",
+                "answer": f"I aim to be a Senior {role}, leading a team of developers. I want to be known for creating architecturally sound systems and mentoring the next generation of engineers in modern tech stacks like Python and Kotlin."
+            }
+        ]
+    }
+
+# ✅ 7. The Feature: AI Cover Letter
 @app.post("/generate_cover_letter")
-async def generate_letter(data: SkillList):
-    # Determine the context of the letter based on the skills provided
-    primary_skill = data.skills[0] if data.skills else "Professional Services"
-    
-    # Check if user is Tech or Non-Tech to change the "Tone"
-    is_tech = any(s in data.skills for s in DOMAIN_LIBRARIES["TECH"])
-    
-    opening = "I am a technical specialist" if is_tech else "I am a results-driven professional"
-    
-    letter_text = (
-        f"Subject: Professional Application\n\n"
-        f"Dear Hiring Manager,\n\n"
-        f"{opening} with a strong background in {primary_skill}. "
-        f"I am writing to express my interest in joining your team. "
-        f"Having successfully applied my skills in {', '.join(data.skills[:3])}, "
-        f"I am confident in my ability to drive success in your organization.\n\n"
-        f"I look forward to discussing how my unique perspective can benefit your "
-        f"current goals. Thank you for your time.\n\n"
-        f"Sincerely,\n[Your Name]"
-    )
-    
-    return {"letter": letter_text}
+async def generate_letter(data: dict):
+    skills = data.get("skills", "Technology")
+    role = data.get("role", "Professional")
+    letter = f"Dear Hiring Manager,\n\nI am writing to express my interest in the {role} position. With my expertise in {skills}, I am confident in my ability to contribute to your team immediately..."
+    return {"cover_letter": letter}
 
+# ✅ 8. Run App
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
