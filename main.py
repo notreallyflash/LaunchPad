@@ -1,3 +1,17 @@
+import os
+from supabase import create_client, Client
+
+# ✅ This pulls the keys from the Render Environment Variables you set
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+
+# This creates the connection to your database
+if url and key:
+    supabase: Client = create_client(url, key)
+    print("✅ Supabase Cloud Connection Initialized")
+else:
+    print("⚠️ Warning: Supabase keys not found. Check Render Environment Variables.")
+    
 import fitz  # PyMuPDF
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
