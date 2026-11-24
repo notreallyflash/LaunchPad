@@ -1,4 +1,3 @@
-
 import logging
 import os
 import re
@@ -7,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 import pytesseract
 from PIL import Image
 
@@ -177,7 +176,7 @@ def extract_text_from_pdf(file_path: str) -> str:
 
     extracted_pages = []
 
-    with fitz.open(file_path) as document:
+    with pymupdf.open(file_path) as document:
 
         if document.needs_pass:
             raise ValueError("Password-protected PDFs are not supported.")
@@ -199,11 +198,11 @@ def extract_text_from_pdf(file_path: str) -> str:
             if len(text) < MIN_TEXT_LENGTH_FOR_OCR:
 
                 pixmap = page.get_pixmap(
-                    matrix=fitz.Matrix(
+                    matrix=pymupdf.Matrix(
                         OCR_RENDER_SCALE,
                         OCR_RENDER_SCALE
                     ),
-                    colorspace=fitz.csRGB,
+                    colorspace=pymupdf.csRGB,
                     alpha=False
                 )
 
