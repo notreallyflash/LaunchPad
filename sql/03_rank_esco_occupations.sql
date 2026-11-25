@@ -125,8 +125,9 @@ AS $function$
     FROM metrics m
 
     WHERE m.matched_essential >=
-        GREATEST(COALESCE(p_min_matched_essential, 2), 0)
-       OR m.essential_pct > 15.0
+        GREATEST(COALESCE(p_min_matched_essential, 2), 2)
+       AND m.essential_pct >= 10.0
+      AND m.weighted_pct >= 8.0
 
     ORDER BY
         m.weighted_pct DESC,

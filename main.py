@@ -14,8 +14,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from supabase import Client, create_client
+from dotenv import load_dotenv
+from services.skill_recognition import SupabaseSkillCatalog
 
 import uvicorn
+
+load_dotenv()
 
 
 # ============================================================
@@ -86,7 +90,7 @@ def initialize_supabase() -> Optional[Client]:
     """Initialize Supabase when environment credentials exist."""
 
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    key = os.getenv("SUPABASE_ANON_KEY")
 
     if not url or not key:
         logger.info("Supabase credentials not configured.")
@@ -103,6 +107,19 @@ def initialize_supabase() -> Optional[Client]:
 
 
 supabase = initialize_supabase()
+
+# Initialize ESCO skill recognition.
+skill_catalog = None
+
+if supabase is not None:
+    try:
+        skill_catalog = SupabaseSkillCatalog(
+            supabase,
+            chunk_size=500
+        )
+        logger.info("ESCO skill catalog initialized.")
+    except Exception:
+        logger.exception("ESCO skill catalog initialization failed.")
 
 
 # ============================================================
@@ -320,6 +337,25 @@ def calculate_resume_score(found_skills: list[str]) -> int:
     return min(40 + (len(found_skills) * 10), 98)
 
 
+def rank_esco_occupations(skill_uris: list[str]) -> list[dict]:
+    """Rank occupations using confirmed ESCO skill URIs."""
+
+    if not supabase or not skill_uris:
+        return []
+
+    response = supabase.rpc(
+        "rank_esco_occupations",
+        {
+            "p_matched_skill_uris": skill_uris,
+            "p_isco_major_groups": ["1", "2", "3", "4", "5"],
+            "p_min_matched_essential": 2,
+            "p_include_all": False,
+        }
+    ).execute()
+
+    return response.data or []
+
+
 # ============================================================
 # 8. API: HEALTH CHECK
 # ============================================================
@@ -421,8 +457,56 @@ async def upload_resume(file: UploadFile = File(...)):
             "strengthening your experience and measurable achievements"
         )
 
+    # Run ESCO analysis without blocking the async request handler.
+    esco_analysis = {
+        "status": "unavailable",
+        "occupation_ranking_status": "unavailable",
+        "confirmed_skills": [],
+        "ambiguous_matches": [],
+        "review_matches": [],
+        "confirmed_skill_uris": [],
+        "occupation_matches": []
+    }
+
+    if skill_catalog is not None:
+        try:
+            recognition = await run_in_threadpool(
+                skill_catalog.recognise,
+                resume_text
+            )
+
+            esco_analysis = recognition.to_dict()
+            esco_analysis["status"] = "success"
+            esco_analysis["occupation_matches"] = []
+            esco_analysis["occupation_ranking_status"] = "not_run"
+
+            try:
+                occupation_matches = await run_in_threadpool(
+                    rank_esco_occupations,
+                    recognition.confirmed_skill_uris
+                )
+
+                esco_analysis["occupation_matches"] = occupation_matches
+                esco_analysis["occupation_ranking_status"] = "success"
+
+            except Exception:
+                logger.exception("ESCO occupation ranking failed.")
+                esco_analysis["occupation_ranking_status"] = "error"
+
+        except Exception:
+            logger.exception("ESCO skill recognition failed.")
+            esco_analysis = {
+                "status": "error",
+                "occupation_ranking_status": "not_run",
+                "confirmed_skills": [],
+                "ambiguous_matches": [],
+                "review_matches": [],
+                "confirmed_skill_uris": [],
+                "occupation_matches": []
+            }
     return {
         "ats_score": score,
+        "esco_analysis": esco_analysis,
         "market_insight": user_sector,
         "core_strengths": found_skills,
         "priority_roadmap": missing_skills[:4],

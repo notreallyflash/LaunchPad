@@ -1,17 +1,19 @@
-
+import json
 import os
 
+from dotenv import load_dotenv
 from supabase import create_client
 from services.skill_recognition import SupabaseSkillCatalog
 
+load_dotenv()
 
 def main():
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+    key = os.getenv("SUPABASE_ANON_KEY")
 
     if not url or not key:
         raise SystemExit(
-            "Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY."
+            "Missing SUPABASE_URL or SUPABASE_ANON_KEY."
         )
 
     try:
